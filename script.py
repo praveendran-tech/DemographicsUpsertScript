@@ -4,7 +4,7 @@ Demographics UPSERT Script
 ---------------------------------
 • Hardcoded Google Sheet (CSV export)
 • Uses u_id as uid
-• Uses grad_term as term
+• Creates grad_term column (from major1_grad_term -> major2 -> major3)
 • Stores full row as JSON payload
 • Handles NaN -> null for JSON
 • UPSERT into src.src_demographics
@@ -17,7 +17,7 @@ from psycopg2.extras import execute_values
 
 
 # ==========================================
-# HARDCODED GOOGLE SHEET
+# GOOGLE SHEET CONFIG
 # ==========================================
 
 SPREADSHEET_ID = ""
@@ -43,7 +43,9 @@ DB_CONFIG = {
 # ==========================================
 
 def fetch_google_sheet():
+
     print("Downloading sheet from Google...")
+
     df = pd.read_csv(CSV_URL)
 
     # Normalize column names
@@ -53,6 +55,23 @@ def fetch_google_sheet():
         .str.lower()
         .str.replace(" ", "_")
     )
+
+    # ------------------------------------------
+    # CREATE grad_term COLUMN
+    # ------------------------------------------
+
+    if "grad_term" not in df.columns:
+
+        df["grad_term"] = None
+
+        if "major1_grad_term" in df.columns:
+            df["grad_term"] = df["major1_grad_term"]
+
+        if "major2_grad_term" in df.columns:
+            df["grad_term"] = df["grad_term"].fillna(df["major2_grad_term"])
+
+        if "major3_grad_term" in df.columns:
+            df["grad_term"] = df["grad_term"].fillna(df["major3_grad_term"])
 
     return df
 
@@ -78,17 +97,15 @@ def upsert_into_postgres(df):
 
     for _, row in df.iterrows():
 
-        # Use u_id as uid
         uid = str(row["u_id"]).strip()
 
-        # Use grad_term as term
         term = str(row["grad_term"]).strip()
 
-        # Convert NaN → None (valid JSON null)
+        # Convert NaN -> None (valid JSON null)
         clean_row = row.where(pd.notnull(row), None)
+
         row_dict = clean_row.to_dict()
 
-        # Convert to valid JSON
         row_json = json.dumps(row_dict, sort_keys=True)
 
         records.append((
