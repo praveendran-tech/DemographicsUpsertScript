@@ -94,6 +94,7 @@ def upsert_into_postgres(df):
     cursor = conn.cursor()
 
     records = []
+    current_uids = []
 
     for _, row in df.iterrows():
 
@@ -115,6 +116,8 @@ def upsert_into_postgres(df):
             SPREADSHEET_ID
         ))
 
+        current_uids.append(uid)
+
     upsert_query = """
         INSERT INTO src.src_demographics
         (uid, term, payload, source_file)
@@ -127,6 +130,17 @@ def upsert_into_postgres(df):
     """
 
     execute_values(cursor, upsert_query, records)
+
+    # Remove students that no longer appear in the current sheet upload
+    delete_query = """
+        DELETE FROM src.src_demographics
+        WHERE source_file = %s
+          AND uid <> ALL(%s);
+    """
+
+    cursor.execute(delete_query, (SPREADSHEET_ID, current_uids))
+    deleted_count = cursor.rowcount
+    print(f"Removed {deleted_count} student(s) no longer in the sheet.")
 
     conn.commit()
     cursor.close()
